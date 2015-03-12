@@ -1,0 +1,470 @@
+
+<?php
+
+function proposeitem_menu() {
+
+  $items['proposition/%/%/delete'] = array(
+    'title' => 'Delete',
+    'page callback' => 'proposeitem_delete',
+    'page arguments' => array(1,2),
+    'access arguments' => array('access content'), // whatever see above
+    'type' => MENU_CALLBACK    
+  );
+  
+    $items['proposition/%/create'] = array(
+    'title' => 'Delete',
+    'page callback' => 'proposeitem_create',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'), // whatever see above
+    'type' => MENU_CALLBACK    
+  );
+  
+  return $items;
+}
+
+
+function proposeitem_delete($arg1, $arg2) 
+{
+	  
+global $user;
+$current_user = $user->uid;
+
+$query = db_select('proposeitem', 'p');
+$query->fields('p', array('uid'));
+$query->condition('p.sellnode_id', $arg1);
+$result = $query->execute();
+
+  foreach ($result as $uid) {
+    $nodeowner= $uid->uid;}
+
+if ($nodeowner == $current_user){
+	db_delete('proposeitem')
+  ->condition('sellnode_id', $arg1)
+  ->execute();
+  
+   drupal_goto('node/' . $arg2 );
+ }
+
+else {drupal_goto('node/403');} //Доступ запрещен
+
+}
+
+
+function proposeitem_create($arg1) 
+{
+	
+$node = new stdClass(); // We create a new node object
+$node->type = "sellitem"; // Or any other content type you want
+$node->title = "Новый лот";
+$node->language = LANGUAGE_NONE; // Or any language code if Locale module is enabled. More on this below *
+////$node->path = array('alias' => 'your node path'); // Setting a node path
+node_object_prepare($node); // Set some default values.
+////$node->uid = 1; // Or any id you wish
+
+
+
+
+
+
+$query = db_select('taxonomy_index', 'ti');
+$query->fields('ti', array('nid', 'tid'));
+$query->condition('ti.nid', $arg1);
+$result = $query->execute();
+  foreach ($result as $tid) {
+    $current_tid= (int)$tid->tid;
+}
+ 
+ 
+$node->field_tags[$node->language][]['tid'] = $current_tid; 
+ 
+$node = node_submit($node); // Prepare node for a submit
+node_save($node); // After this call we'll get a nid
+
+$myurl = "node/". $node->nid . "/edit";   
+$mydest = "node/" . $arg1; 
+drupal_goto($myurl, array('query' => array('destination' => $mydest)));
+
+
+}
+
+
+
+
+function proposeitem_getnodes() {
+	$output="";
+   
+if ($node = menu_get_object()) {
+
+$current_node = $node->nid;
+
+$query = db_select('taxonomy_index', 'ti');
+$query->fields('ti', array('nid', 'tid'));
+$query->condition('ti.nid', $current_node);
+$result = $query->execute();
+$tids = array();
+  foreach ($result as $tid) {
+    $current_tid= (int)$tid->tid;
+}
+  
+global $user;
+$current_user = $user->uid;
+
+ 
+$query = db_select('node', 'n');
+$query->fields('n', array('nid', 'title', 'type', 'uid', 'status'));
+$query->leftJoin('taxonomy_index', 'ti', 'n.nid = ti.nid');
+$query->leftJoin('proposeitem', 'pi', 'n.nid = sellnode_id');
+$query->condition('n.type', 'sellitem');
+$query->condition('n.status', NODE_PUBLISHED);
+$query->condition('n.uid', $current_user);
+$query->condition('ti.tid', $current_tid);
+$query->condition('sellnode_id',NULL);
+
+$result = $query->execute(); 
+
+ $nodes = array();
+  foreach ($result as $node) {
+    $nodes[$node->nid] = check_plain($node->title);
+
+  }
+
+ return $nodes;
+ 
+}	
+}
+
+
+
+
+
+function proposeitem_getlist() {
+	global $user;
+$current_user = $user->uid;
+
+if ($node = menu_get_object()) {
+ 	$buyn = $node->nid;
+   }
+   
+$output="";
+$query = db_select('proposeitem', 'p');
+$query->innerJoin('node', 'n', 'p.sellnode_id = n.nid');
+$query->fields('p', array('sellnode_id', 'created', 'uid'));
+$query->fields('n', array('title'));
+
+ $result = $query->execute();
+	  
+	  $rows = array();
+	  $header = array( 'Sel node', 'Title', 'Created', 'User', 'Actions');
+  while ($value = $result->fetchAssoc()) {
+	  if ($value['uid'] == $current_user)
+	  {$rowaction="<a href='/proposition/".$value['sellnode_id']."/".$buyn."/delete'>Удалить</a>";}
+	  else {$rowaction="";}
+	  
+	  $rows[] = array(
+		$value['sellnode_id'],
+		$value['title'],
+		$value['created'],
+		$value['uid'],
+		$rowaction
+			  
+	  );
+	}
+	$output=   theme('table', array('header' => $header, 'rows' => $rows));
+ return $output;
+}
+
+
+
+
+
+
+
+
+function proposeitem_form($form, &$form_state) {
+	
+  $options = proposeitem_getnodes();
+  $endopt= end($options); 
+  
+  if ($node = menu_get_object()) {
+ 	$buyn = $node->nid;
+   }
+  
+  $olen = count($options); // сколько предложений может приатачить
+  
+  if ($olen<1)
+  {
+
+			
+		 
+		  $form['markup'] = array(
+			'#prefix' => '<div id = "formajaxnodecontent">',
+			'#suffix' => '</div>',
+			'#markup' =>  "Вам нечего предложить, поэтому <a href='/proposition/" . $buyn ."/create'>создайте новый продукт</a>",
+		  );
+		 
+		 $form['currentnode']= array(
+			'#type' => 'hidden',
+			'#value' => $buyn,
+		);
+
+ return $form; 
+
+
+	  }//end if olen <1
+ 
+  else 
+  {
+	  
+	  
+  $form['markup'] = array(
+    '#prefix' => '<div id = "formajaxnodecontent">',
+    '#suffix' => '</div>',
+    '#markup' =>  "<a href='/proposition/" . $buyn ."/create'>Создайте новый продукт</a> или выберете из списка", 
+  );
+  
+  
+  $form['node'] = array(
+    '#type' => 'select',
+    '#title' => t('Выбрать из списка'),
+    '#options' => $options,
+	//'#default_value' => $endopt, 
+	//'#value' => 2, 
+    '#prefix' => '<div id = "form-ajax-nodes">',
+    '#suffix' => '</div>',
+  );
+  
+ 
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Предложить'),
+   // '#ajax' => array(
+   //   'callback' => 'proposeitem_write',
+   //   'wrapper' => 'formajaxnodecontent',
+   //  
+  //  ),
+  );
+  	
+ 
+  
+ 
+ $form['currentnode']= array(
+    '#type' => 'hidden',
+    '#value' => $buyn,
+);
+ 
+ 
+  return $form; 
+  }// end if $olen >1
+}
+
+
+function proposeitem_form_submit($form, &$form_state) {
+	if (isset($form_state['values']['node'])) {
+
+   $nid = $form_state['values']['node'];
+  $buyn = $form_state['values']['currentnode'];
+	 proposeitem_write($nid,$buyn);
+	}
+ // drupal_set_message(t('Result is @num', array('@num' => $result)));
+}
+
+
+
+
+function proposeitem_write($nid,$buyn) {
+	
+
+
+   
+  
+
+   global $user;
+   $current_user = $user->uid;
+
+	
+ db_insert('proposeitem')
+   ->fields(array(
+   'buynode_id' => $buyn, 
+   'sellnode_id' => $nid, 
+   'uid' => $current_user,
+   'created' => date('Y-m-d H:m:s'),
+   ))
+   ->execute();
+	
+	
+	
+
+
+}
+
+
+
+
+
+
+
+
+
+
+function proposeitem_block_info() {
+  $blocks['propositions'] = array(
+    'info' => t('Выбрать из своих лотов'),
+    'cache' => DRUPAL_CACHE_PER_USER,
+  );
+  
+   $blocks['propositions_list'] = array(
+    'info' => t('Список предложений'),
+    'cache' => DRUPAL_CACHE_PER_USER,
+  );
+  
+ 
+  return $blocks;
+}
+
+
+function proposeitem_block_view($delta = '') {
+  $block = array();
+ 
+  switch ($delta) {
+    case 'propositions':
+      $block['subject'] = t('Выбрать из своих лотов');
+      $block['content'] = drupal_get_form('proposeitem_form');//proposeitem_getnodes(); //drupal_get_form('yourmodule_form_function');
+      break;
+	  
+	   case 'propositions_list':
+      $block['subject'] = t('Список предложений');
+      $block['content'] = proposeitem_getlist(); 
+      break;
+	  
+	  
+  }
+  return $block;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+function proposeitem_get_last_nodes() {
+  
+$query = db_select('node', 'n');
+$query->fields('n', array('nid', 'title', 'type'));
+$query->condition('n.type', 'sellitem', '==');
+$result = $query->execute();
+
+  $nodes = array();
+  foreach ($result as $node) {
+    $nodes[$node->nid] = check_plain($node->title);
+  }
+  return $nodes;
+}
+
+
+
+function proposeitem_form($form, &$form_state) {
+  $options = proposeitem_get_last_nodes();
+  
+  $form['node'] = array(
+    '#type' => 'select',
+    '#title' => t('Nodes from '),
+    '#options' => $options,
+    '#prefix' => '<div id = "proposeitem-nodes">',
+    '#suffix' => '</div>',
+  );
+ 
+ 
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Load nodes'),
+    '#ajax' => array(
+      'callback' => 'proposeitem_form_load_node_content',
+      'wrapper' => 'proposeitem-node-content',
+      'method' => 'replace',
+      'effect' => 'fade',
+    ),
+  );
+ 
+
+  $form['markup'] = array(
+    '#prefix' => '<div id = "proposeitem-node-content">',
+    '#suffix' => '</div>',
+    '#markup' => '',
+  );
+ 
+  return $form;
+}
+ 
+
+function proposeitem_form_load_nodes($form, $form_state) {
+ 
+  return $form['node'];
+}
+ 
+
+function proposeitem_form_load_node_content($form, $form_state) {
+
+  if (isset($form_state['values']['node'])) {
+
+    $nid = $form_state['values']['node'];
+    $node = node_load($nid);
+    $view = node_view($node);
+    $form['markup']['#markup'] = render($view);
+  }
+  return $form['markup'];
+}
+*/
+
+
+
